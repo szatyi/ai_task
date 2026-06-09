@@ -60,9 +60,10 @@ Frontend (developer knowledge):
   Create an output architecture document suitable for the implementation planning phase
 
 ## Phase 3 - Architecture Refinemt
+
 - Review the modules list and indentify areas which need further refinement before tickets/tasks creation. For example: - more detailed authentication method description. Give suggestions for more detailed descriptions
 - Refine the existing Architecture.md document. Your goal is NOT to redesign the system. Your goal is to refine and complete the existing architecture so that implementation tickets can be generated immediately afterward. Fill in the gaps you identified which would be necesseary for implementation. Prefer the simplest solution that satisfies the requirements.
-The MVP must be optimized for:
+  The MVP must be optimized for:
 
 Fast delivery
 Minimal operational complexity
@@ -73,50 +74,60 @@ Easy deployment
 Future extensibility where it costs little to support
 
 ## Phase 3 - Data modeling and API contracts design
+
 Based on the Architecture document define data models and API contracts.
+
 ### Data Models
+
 For each core entity:
+
 - Define its purpose.
 - List key fields and their types.
 - Define relationships to other entities.
 - Document important business rules and validation constraints.
-At a minimum cover:
+  At a minimum cover:
 - User
 - Subscription
 - AlertRule
 - Event
 - Delivery
 - FailureRecord
-Also define:
+  Also define:
 - Database tables
 - Primary and foreign keys
 - Unique constraints
 - Required indexes
-Keep the design simple and SQLite-friendly.
+  Keep the design simple and SQLite-friendly.
+
 ### API Contracts
+
 For each major endpoint:
+
 - Endpoint path and method
 - Purpose
 - Authentication requirements
 - Request structure
 - Response structure
 - Expected error types
-Cover at least:
+  Cover at least:
 - Authentication endpoints
 - Subscription management
 - Alert rule management
 - Test notifications
 - Monitoring and admin endpoints
-Use high-level JSON examples where useful.
+  Use high-level JSON examples where useful.
 
 ## Phase 4 - ticket creation
+
 You are an expert Senior Software Engineer and Technical Product Owner. Your objective is to parse the Architecture.md document and convert it into a structured, implementation-ready backlog, which can be executed on without further refinement.
 Strict Guardrails & Scope Rules:
-1. Base everything STRICTLY on the provided ADR text. 
+
+1. Base everything STRICTLY on the provided ADR text.
 2. Do NOT introduce new architecture, design patterns, or unmentioned technologies.
 3. Do NOT redesign systems or add "nice-to-have" features.
 4. Do NOT over-engineer. If the ADR specifies a simple solution, ticket the simple solution.
-Ensure tickets are created for:
+   Ensure tickets are created for:
+
 - Authentication & authorization
 - Database models & persistence layer
 - Subscription management
@@ -128,4 +139,24 @@ Ensure tickets are created for:
 - Background processing (worker/jobs)
 - Provider adapters
 - Retention & cleanup jobs
-Generate the backlog using Markdown in a separate file.
+  Generate the backlog using Markdown in a separate file.
+
+## Phase 5 - implmentation
+You are a software delivery agent that executes tickets to build a software system based on the available resources.
+Work one ticket at a time:
+1. Pick the next ready ticket.
+2. Inspect only what is needed to implement it.
+3. Make the smallest correct change.
+5. Fix any failure before moving on.
+6. Include tests for every feature.
+
+Rules:
+
+- Follow ticket acceptance criteria exactly.
+- Do not expand scope beyond the ticket.
+- Do not invent requirements.
+- Prefer existing patterns and conventions.
+- Keep changes small and reviewable.
+- Report what changed, how it was validated, and any blockers.
+
+Continue until all tickets are complete.
