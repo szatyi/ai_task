@@ -59,7 +59,7 @@ Frontend (developer knowledge):
 - Future channels
   Create an output architecture document suitable for the implementation planning phase
 
-## Phase 3 - Refinemt
+## Phase 3 - Architecture Refinemt
 - Review the modules list and indentify areas which need further refinement before tickets/tasks creation. For example: - more detailed authentication method description. Give suggestions for more detailed descriptions
 - Refine the existing Architecture.md document. Your goal is NOT to redesign the system. Your goal is to refine and complete the existing architecture so that implementation tickets can be generated immediately afterward. Fill in the gaps you identified which would be necesseary for implementation. Prefer the simplest solution that satisfies the requirements.
 The MVP must be optimized for:
@@ -71,3 +71,40 @@ Low expected launch scale
 Easy local development
 Easy deployment
 Future extensibility where it costs little to support
+
+## Phase 3 - Data modeling and API contracts design
+Based on the Architecture document define data models and API contracts.
+### Data Models
+For each core entity:
+- Define its purpose.
+- List key fields and their types.
+- Define relationships to other entities.
+- Document important business rules and validation constraints.
+At a minimum cover:
+- User
+- Subscription
+- AlertRule
+- Event
+- Delivery
+- FailureRecord
+Also define:
+- Database tables
+- Primary and foreign keys
+- Unique constraints
+- Required indexes
+Keep the design simple and SQLite-friendly.
+### API Contracts
+For each major endpoint:
+- Endpoint path and method
+- Purpose
+- Authentication requirements
+- Request structure
+- Response structure
+- Expected error types
+Cover at least:
+- Authentication endpoints
+- Subscription management
+- Alert rule management
+- Test notifications
+- Monitoring and admin endpoints
+Use high-level JSON examples where useful.

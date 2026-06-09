@@ -385,3 +385,718 @@ For the MVP, the simplest practical deployment shape is:
 - One scheduled worker process or job runner for ingestion and delivery processing, if background execution is not handled inside the web process.
 
 This keeps the system easy to deploy for a demo while still leaving room to evolve toward separate worker processes, stronger databases, and more providers later.
+
+## 7. Data Model Reference
+
+This section defines the core entities for implementation planning. The schema is intentionally small and maps cleanly to SQLite tables with straightforward foreign keys and unique constraints.
+
+### 7.1 User
+
+Purpose:
+
+- Represents an authenticated person using the system as an end user or internal operator.
+
+Key fields:
+
+- `id: string` - primary key, use UUID or ULID stored as text.
+- `email: string` - unique login and contact identifier.
+- `display_name: string | null` - optional human-readable name.
+- `role: "user" | "operator"` - authorization role.
+- `status: "active" | "disabled"` - account state.
+- `created_at: string` - ISO timestamp.
+- `updated_at: string` - ISO timestamp.
+
+Relationships:
+
+- One user has many subscriptions.
+- One user can create many deliveries indirectly through subscriptions.
+
+Business rules and validation:
+
+- Email is required and unique.
+- Role must be one of the supported values.
+- Disabled users cannot create or manage subscriptions and cannot access admin endpoints.
+
+Table: `users`
+
+- Primary key: `id`
+- Unique constraints: `email`
+- Required indexes: `idx_users_email`, `idx_users_role`, `idx_users_status`
+
+### 7.2 Subscription
+
+Purpose:
+
+- Represents a user’s subscription to a curated alert rule for one or more delivery channels.
+
+Key fields:
+
+- `id: string` - primary key.
+- `user_id: string` - foreign key to `users.id`.
+- `alert_rule_id: string` - foreign key to `alert_rules.id`.
+- `channel: "email" | "slack"` - delivery channel.
+- `status: "active" | "inactive"` - subscription state.
+- `created_at: string` - ISO timestamp.
+- `updated_at: string` - ISO timestamp.
+- `deactivated_at: string | null` - timestamp when made inactive.
+
+Relationships:
+
+- Many subscriptions belong to one user.
+- Many subscriptions belong to one alert rule.
+- One subscription can produce many deliveries over time.
+
+Business rules and validation:
+
+- A user may have only one active subscription per alert rule and channel combination.
+- Subscriptions should be marked inactive rather than deleted for MVP.
+- Channel must match a supported provider.
+- User and alert rule must both exist and be active at the time of subscription creation.
+
+Table: `subscriptions`
+
+- Primary key: `id`
+- Foreign keys: `user_id -> users.id`, `alert_rule_id -> alert_rules.id`
+- Unique constraints: `(user_id, alert_rule_id, channel)`
+- Required indexes: `idx_subscriptions_user_id`, `idx_subscriptions_alert_rule_id`, `idx_subscriptions_status`, `idx_subscriptions_user_status`
+
+### 7.3 AlertRule
+
+Purpose:
+
+- Represents a curated alert definition managed by an internal operator.
+
+Key fields:
+
+- `id: string` - primary key.
+- `name: string` - display name.
+- `description: string | null` - human-readable rule summary.
+- `source_type: "rss" | "api"` - source category.
+- `source_identifier: string` - source URL, feed id, or provider identifier.
+- `trigger_condition: string` - simple serialized condition or rule token for MVP.
+- `status: "enabled" | "disabled"` - rule state.
+- `created_by_user_id: string` - foreign key to `users.id`.
+- `created_at: string` - ISO timestamp.
+- `updated_at: string` - ISO timestamp.
+
+Relationships:
+
+- One alert rule can have many subscriptions.
+- One alert rule can match many events.
+
+Business rules and validation:
+
+- Name, source type, source identifier, and trigger condition are required.
+- Only operators can create or change rules.
+- Disabled rules must not generate new deliveries.
+- `trigger_condition` should remain simple and parseable by the matching service; avoid a full user-authored expression language for MVP.
+
+Table: `alert_rules`
+
+- Primary key: `id`
+- Foreign keys: `created_by_user_id -> users.id`
+- Unique constraints: optionally `(source_type, source_identifier, name)` if duplicate rule names per source should be prevented
+- Required indexes: `idx_alert_rules_status`, `idx_alert_rules_source_type`, `idx_alert_rules_source_identifier`
+
+### 7.4 Event
+
+Purpose:
+
+- Represents a normalized internal event ingested from RSS feeds or external APIs.
+
+Key fields:
+
+- `id: string` - primary key.
+- `source_type: "rss" | "api"` - source category.
+- `source_identifier: string` - source instance or provider identifier.
+- `external_event_id: string` - provider item id, guid, webhook id, or equivalent.
+- `dedup_key: string` - stable idempotency key.
+- `title: string` - normalized title.
+- `summary: string | null` - normalized summary or excerpt.
+- `event_url: string | null` - canonical source URL.
+- `occurred_at: string` - event timestamp.
+- `payload_json: string` - serialized original or normalized payload.
+- `created_at: string` - ISO timestamp.
+
+Relationships:
+
+- One event can generate many deliveries.
+- One event can have many matching results if the system stores evaluation records later.
+
+Business rules and validation:
+
+- `dedup_key` must be unique.
+- `external_event_id` should be unique per `source_type` and `source_identifier` if the provider supplies a stable identifier.
+- Store only the payload data required for matching, operational visibility, and debugging.
+
+Table: `events`
+
+- Primary key: `id`
+- Unique constraints: `dedup_key`, optionally `(source_type, source_identifier, external_event_id)`
+- Required indexes: `idx_events_source_type`, `idx_events_source_identifier`, `idx_events_occurred_at`, `idx_events_dedup_key`
+
+### 7.5 Delivery
+
+Purpose:
+
+- Represents a notification delivery attempt for a given event, subscription, and channel.
+
+Key fields:
+
+- `id: string` - primary key.
+- `event_id: string` - foreign key to `events.id`.
+- `subscription_id: string` - foreign key to `subscriptions.id`.
+- `channel: "email" | "slack"` - delivery channel.
+- `status: "queued" | "sending" | "sent" | "failed" | "skipped"` - delivery state.
+- `attempt_count: number` - number of send attempts.
+- `provider_message_id: string | null` - provider response id when available.
+- `failure_record_id: string | null` - foreign key to `failure_records.id`.
+- `queued_at: string` - ISO timestamp.
+- `sent_at: string | null` - ISO timestamp.
+- `updated_at: string` - ISO timestamp.
+
+Relationships:
+
+- Many deliveries belong to one event.
+- Many deliveries belong to one subscription.
+- A delivery may reference one failure record.
+
+Business rules and validation:
+
+- One delivery should exist for each event-subscription-channel combination.
+- The orchestration layer must ensure idempotency before creating a delivery.
+- `attempt_count` must not exceed the configured retry cap.
+- `status` transitions should only follow the small state machine defined in the architecture.
+
+Table: `deliveries`
+
+- Primary key: `id`
+- Foreign keys: `event_id -> events.id`, `subscription_id -> subscriptions.id`, `failure_record_id -> failure_records.id`
+- Unique constraints: `(event_id, subscription_id, channel)`
+- Required indexes: `idx_deliveries_event_id`, `idx_deliveries_subscription_id`, `idx_deliveries_channel`, `idx_deliveries_status`, `idx_deliveries_queued_at`
+
+### 7.6 FailureRecord
+
+Purpose:
+
+- Captures recent operational failure details for admin monitoring and troubleshooting.
+
+Key fields:
+
+- `id: string` - primary key.
+- `delivery_id: string` - foreign key to `deliveries.id`.
+- `failure_type: string` - normalized failure category.
+- `provider_name: string` - `email` or `slack` provider identifier.
+- `error_message: string` - short human-readable failure summary.
+- `error_code: string | null` - provider or internal code.
+- `failure_payload_json: string | null` - minimal serialized provider response or diagnostic payload.
+- `created_at: string` - ISO timestamp.
+
+Relationships:
+
+- One failure record belongs to one delivery.
+- A delivery may have zero or one current failure record for MVP; additional attempts can overwrite or append depending on the implementation choice, but the schema should remain simple.
+
+Business rules and validation:
+
+- Keep failure details minimal and time-bounded.
+- Do not store secrets or full provider payloads.
+- Failure records should be retained only for the short operational window required by the requirements.
+
+Table: `failure_records`
+
+- Primary key: `id`
+- Foreign keys: `delivery_id -> deliveries.id`
+- Unique constraints: `delivery_id` if only one current failure record is stored per delivery
+- Required indexes: `idx_failure_records_delivery_id`, `idx_failure_records_created_at`, `idx_failure_records_provider_name`
+
+### 7.7 Supporting Tables
+
+The following supporting tables are recommended for implementation, even though they are not part of the minimum entity list:
+
+- `sessions` - if auth sessions are persisted in the application database.
+- `delivery_attempts` - if individual retry attempts need to be tracked separately from the current delivery state.
+- `retention_jobs` or `job_runs` - if scheduled maintenance needs its own audit trail.
+
+These should remain optional until the implementation plan confirms that they are needed.
+
+## 8. API Contract Reference
+
+API endpoints are described at a high level and can be implemented as Next.js route handlers or server actions. JSON shapes are intentionally simple and compatible with SQLite-backed application services.
+
+### 8.1 Authentication Endpoints
+
+#### POST /api/auth/login
+
+Purpose:
+
+- Authenticates a user and creates a session.
+
+Authentication:
+
+- None required.
+
+Request:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "optional-or-provider-specific"
+}
+```
+
+Response:
+
+```json
+{
+  "user": {
+    "id": "usr_123",
+    "email": "user@example.com",
+    "displayName": "Alex Chen",
+    "role": "user"
+  }
+}
+```
+
+Errors:
+
+- `400 Bad Request` for invalid payload.
+- `401 Unauthorized` for invalid credentials.
+- `403 Forbidden` if the account is disabled.
+
+#### POST /api/auth/logout
+
+Purpose:
+
+- Invalidates the current session.
+
+Authentication:
+
+- Required.
+
+Request:
+
+- No body required.
+
+Response:
+
+```json
+{
+  "success": true
+}
+```
+
+Errors:
+
+- `401 Unauthorized` if no session exists.
+
+#### GET /api/auth/me
+
+Purpose:
+
+- Returns the current authenticated user and role.
+
+Authentication:
+
+- Required.
+
+Response:
+
+```json
+{
+  "user": {
+    "id": "usr_123",
+    "email": "user@example.com",
+    "displayName": "Alex Chen",
+    "role": "operator"
+  }
+}
+```
+
+Errors:
+
+- `401 Unauthorized` if the session is missing or invalid.
+
+### 8.2 Subscription Management
+
+#### GET /api/subscriptions
+
+Purpose:
+
+- Lists the authenticated user’s active and inactive subscriptions.
+
+Authentication:
+
+- Required.
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "id": "sub_123",
+      "alertRuleId": "rule_001",
+      "alertRuleName": "Breaking News",
+      "channel": "email",
+      "status": "active"
+    }
+  ]
+}
+```
+
+Errors:
+
+- `401 Unauthorized` if not logged in.
+
+#### POST /api/subscriptions
+
+Purpose:
+
+- Creates a subscription for the current user.
+
+Authentication:
+
+- Required.
+
+Request:
+
+```json
+{
+  "alertRuleId": "rule_001",
+  "channel": "email"
+}
+```
+
+Response:
+
+```json
+{
+  "subscription": {
+    "id": "sub_123",
+    "alertRuleId": "rule_001",
+    "channel": "email",
+    "status": "active"
+  }
+}
+```
+
+Errors:
+
+- `400 Bad Request` for missing or invalid fields.
+- `401 Unauthorized` if not logged in.
+- `404 Not Found` if the alert rule does not exist.
+- `409 Conflict` if an active subscription already exists for the same user, alert, and channel.
+
+#### PATCH /api/subscriptions/{subscriptionId}
+
+Purpose:
+
+- Updates a subscription status, typically to deactivate it.
+
+Authentication:
+
+- Required.
+
+Request:
+
+```json
+{
+  "status": "inactive"
+}
+```
+
+Response:
+
+```json
+{
+  "subscription": {
+    "id": "sub_123",
+    "status": "inactive"
+  }
+}
+```
+
+Errors:
+
+- `400 Bad Request` for invalid status.
+- `401 Unauthorized` if not logged in.
+- `404 Not Found` if the subscription does not exist or does not belong to the caller.
+
+### 8.3 Alert Rule Management
+
+#### GET /api/admin/alert-rules
+
+Purpose:
+
+- Lists curated alert rules for operators.
+
+Authentication:
+
+- Required.
+- Operator role required.
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "id": "rule_001",
+      "name": "Breaking News",
+      "sourceType": "rss",
+      "sourceIdentifier": "https://example.com/feed.xml",
+      "status": "enabled"
+    }
+  ]
+}
+```
+
+Errors:
+
+- `401 Unauthorized` if not logged in.
+- `403 Forbidden` if the user is not an operator.
+
+#### POST /api/admin/alert-rules
+
+Purpose:
+
+- Creates a curated alert rule.
+
+Authentication:
+
+- Required.
+- Operator role required.
+
+Request:
+
+```json
+{
+  "name": "Breaking News",
+  "description": "Important news alerts",
+  "sourceType": "rss",
+  "sourceIdentifier": "https://example.com/feed.xml",
+  "triggerCondition": "contains:breaking"
+}
+```
+
+Response:
+
+```json
+{
+  "alertRule": {
+    "id": "rule_001",
+    "status": "enabled"
+  }
+}
+```
+
+Errors:
+
+- `400 Bad Request` for validation failures.
+- `401 Unauthorized` if not logged in.
+- `403 Forbidden` if the user is not an operator.
+
+#### PATCH /api/admin/alert-rules/{alertRuleId}
+
+Purpose:
+
+- Enables or disables an alert rule.
+
+Authentication:
+
+- Required.
+- Operator role required.
+
+Request:
+
+```json
+{
+  "status": "disabled"
+}
+```
+
+Response:
+
+```json
+{
+  "alertRule": {
+    "id": "rule_001",
+    "status": "disabled"
+  }
+}
+```
+
+Errors:
+
+- `400 Bad Request` for invalid status.
+- `401 Unauthorized` if not logged in.
+- `403 Forbidden` if the user is not an operator.
+- `404 Not Found` if the rule does not exist.
+
+### 8.4 Test Notifications
+
+#### POST /api/admin/test-notifications
+
+Purpose:
+
+- Sends a test notification through email or Slack without creating a real subscription or production alert.
+
+Authentication:
+
+- Required.
+- Operator role required.
+
+Request:
+
+```json
+{
+  "channel": "slack",
+  "target": "optional destination override",
+  "message": "Test notification from the admin console"
+}
+```
+
+Response:
+
+```json
+{
+  "result": {
+    "status": "sent",
+    "channel": "slack",
+    "providerMessageId": "msg_123"
+  }
+}
+```
+
+Errors:
+
+- `400 Bad Request` for invalid channel or payload.
+- `401 Unauthorized` if not logged in.
+- `403 Forbidden` if the user is not an operator.
+- `422 Unprocessable Entity` if the selected channel is not configured.
+- `502 Bad Gateway` if the provider call fails.
+
+### 8.5 Monitoring and Admin Endpoints
+
+#### GET /api/admin/monitoring/summary
+
+Purpose:
+
+- Returns a high-level health summary for subscriptions and delivery activity.
+
+Authentication:
+
+- Required.
+- Operator role required.
+
+Response:
+
+```json
+{
+  "activeSubscriptions": 124,
+  "recentDeliveries": 38,
+  "recentFailures": 2,
+  "health": "degraded"
+}
+```
+
+Errors:
+
+- `401 Unauthorized` if not logged in.
+- `403 Forbidden` if the user is not an operator.
+
+#### GET /api/admin/deliveries
+
+Purpose:
+
+- Lists recent delivery records for monitoring.
+
+Authentication:
+
+- Required.
+- Operator role required.
+
+Query parameters:
+
+- `status` - optional filter.
+- `channel` - optional filter.
+- `limit` - optional result limit.
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "id": "del_123",
+      "eventId": "evt_001",
+      "subscriptionId": "sub_123",
+      "channel": "email",
+      "status": "sent",
+      "sentAt": "2026-06-09T10:00:00Z"
+    }
+  ]
+}
+```
+
+Errors:
+
+- `401 Unauthorized` if not logged in.
+- `403 Forbidden` if the user is not an operator.
+
+#### GET /api/admin/failures
+
+Purpose:
+
+- Lists recent failure records.
+
+Authentication:
+
+- Required.
+- Operator role required.
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "id": "fail_123",
+      "deliveryId": "del_123",
+      "providerName": "slack",
+      "errorMessage": "Webhook rejected",
+      "createdAt": "2026-06-09T10:01:00Z"
+    }
+  ]
+}
+```
+
+Errors:
+
+- `401 Unauthorized` if not logged in.
+- `403 Forbidden` if the user is not an operator.
+
+### 8.6 Shared Error Pattern
+
+For most endpoints, use a consistent JSON error response:
+
+```json
+{
+  "error": {
+    "code": "INVALID_REQUEST",
+    "message": "alertRuleId is required"
+  }
+}
+```
+
+Recommended error codes:
+
+- `INVALID_REQUEST`
+- `UNAUTHORIZED`
+- `FORBIDDEN`
+- `NOT_FOUND`
+- `CONFLICT`
+- `UNPROCESSABLE_ENTITY`
+- `PROVIDER_FAILURE`
+- `INTERNAL_ERROR`
