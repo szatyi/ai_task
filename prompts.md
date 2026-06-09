@@ -108,3 +108,24 @@ Cover at least:
 - Test notifications
 - Monitoring and admin endpoints
 Use high-level JSON examples where useful.
+
+## Phase 4 - ticket creation
+You are an expert Senior Software Engineer and Technical Product Owner. Your objective is to parse the Architecture.md document and convert it into a structured, implementation-ready backlog, which can be executed on without further refinement.
+Strict Guardrails & Scope Rules:
+1. Base everything STRICTLY on the provided ADR text. 
+2. Do NOT introduce new architecture, design patterns, or unmentioned technologies.
+3. Do NOT redesign systems or add "nice-to-have" features.
+4. Do NOT over-engineer. If the ADR specifies a simple solution, ticket the simple solution.
+Ensure tickets are created for:
+- Authentication & authorization
+- Database models & persistence layer
+- Subscription management
+- Alert rules
+- Event ingestion
+- Matching & evaluation
+- Notification delivery (email + Slack)
+- Admin monitoring
+- Background processing (worker/jobs)
+- Provider adapters
+- Retention & cleanup jobs
+Generate the backlog using Markdown in a separate file.
