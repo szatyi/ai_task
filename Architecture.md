@@ -4,6 +4,8 @@
 
 The recommended architecture is a single monolithic application built with Next.js, TypeScript, and React, backed by SQLite. The application should use a layered design with clear separation between presentation, application logic, domain rules, and infrastructure adapters.
 
+The implementation should optimize for fast delivery, minimal operational complexity, small-team ownership, easy local development, easy deployment, and low launch-scale usage. When there is a tradeoff, prefer the simplest design that preserves extensibility through clear interfaces.
+
 This style is the best fit for the MVP because it keeps implementation and deployment simple while still enforcing boundaries that support future growth. The product scope is narrow, the expected launch volume is low, and the team needs a structure that can support alert subscription management, alert evaluation, notification delivery, and an internal admin view without introducing distributed-system complexity too early.
 
 The monolith should still be designed as if it could be split later. That means:
@@ -12,6 +14,8 @@ The monolith should still be designed as if it could be split later. That means:
 - Business rules live in application and domain modules.
 - External systems such as RSS feeds, APIs, email, and Slack are isolated behind adapters.
 - Persistence is accessed through repository interfaces rather than directly from UI code.
+
+The architecture assumes a single shared application runtime for the web UI, API routes or server actions, and background processing entry points. If background work is separated later, it should reuse the same application and domain layers.
 
 The preferred runtime shape is a Next.js application that serves the UI and exposes server-side APIs or server actions for application operations. Background work such as alert ingestion and delivery processing can run as scheduled jobs or a lightweight worker process in the same codebase, depending on deployment needs.
 
@@ -50,6 +54,11 @@ The preferred runtime shape is a Next.js application that serves the UI and expo
 - Keep logs minimal and time-bounded.
   - Store only the operational data needed for recent monitoring and troubleshooting.
   - Apply short retention for delivery history and failure records.
+
+- Use a simple session-based authentication model.
+  - End users and internal operators authenticate through the same application entry point.
+  - Sessions carry a role claim so admin-only screens and operations can be protected consistently.
+  - If an external identity provider is introduced later, it should plug into the same session boundary without changing the application services.
 
 ### Rejected alternatives
 
@@ -100,7 +109,10 @@ Responsibilities:
 
 Notes:
 
-- The MVP can use a simple auth mechanism if required by deployment, but the access boundary should be explicit in code.
+- Use one authentication mechanism for the MVP and enforce authorization through role-based access control.
+- Recommended implementation shape: session cookies backed by Next.js server-side auth helpers, with roles such as `user` and `operator` stored in the session.
+- Admin access should be checked both in the UI route layer and in server-side handlers so privileged actions cannot be reached directly.
+- Keep user provisioning simple for MVP: no separate admin console for identity management, and no complex organization hierarchy.
 
 ### 3.3 Subscription Module
 
@@ -117,6 +129,13 @@ Core concepts:
 - Delivery channel preference
 - Subscription status
 
+Refinement notes for tickets:
+
+- Define the subscription uniqueness rule as one active subscription per user, alert, and delivery channel combination.
+- Support a single subscription record with per-channel preferences rather than separate subscription workflows for email and Slack.
+- Store `active` and `inactive` states instead of deleting records so the admin view and future troubleshooting can reuse the same record history.
+- Keep subscription creation idempotent so repeated user actions return the existing subscription instead of creating duplicates.
+
 ### 3.4 Alert Definition Module
 
 Responsibilities:
@@ -131,6 +150,13 @@ Core concepts:
 - Rule status
 - Source definition
 - Trigger condition
+
+Refinement notes for tickets:
+
+- Treat alert rules as curated and operator-managed.
+- For MVP, define a small fixed set of rule fields: name, source type, source identifier, trigger condition, enabled flag, and display description.
+- Rule creation should validate required fields and source type before persisting.
+- Disabling a rule should prevent future matches without removing historical subscription or delivery data.
 
 ### 3.5 Event Ingestion Module
 
@@ -147,6 +173,13 @@ Core concepts:
 - Normalized event
 - Idempotency key
 
+Refinement notes for tickets:
+
+- Support two ingestion paths in the MVP: scheduled polling for RSS feeds and API polling/webhook ingestion for external APIs.
+- Normalize all inbound payloads into a single internal event shape that includes source, external identifier, timestamp, title, summary, and a deduplication key.
+- Use a source-specific idempotency key plus a unique database constraint to prevent duplicate event ingestion.
+- Store only the fields needed for matching, delivery, and short-term operational review.
+
 ### 3.6 Matching and Evaluation Module
 
 Responsibilities:
@@ -160,6 +193,13 @@ Core concepts:
 - Match result
 - Notification candidate
 - Delivery task
+
+Refinement notes for tickets:
+
+- Evaluate matches through a deterministic service that receives one normalized event and returns a list of candidate deliveries.
+- Run matching in the same application codebase as ingestion to keep the MVP simple; if a queue is added later, it should only wrap this service.
+- Persist the evaluation result or downstream delivery task only when needed for idempotency and admin visibility.
+- Keep matching rules intentionally simple: source and trigger conditions from the curated rule set are sufficient for MVP.
 
 ### 3.7 Notification Orchestration Module
 
@@ -175,6 +215,14 @@ Core concepts:
 - Delivery attempt
 - Delivery status
 
+Refinement notes for tickets:
+
+- Use a small delivery state machine: queued, sending, sent, failed, and skipped.
+- Enforce idempotency at the orchestration layer so reprocessing the same event does not send duplicate notifications.
+- Track the last error message, provider response summary, and timestamps for recent attempts.
+- Keep retries simple and bounded if they are added: retry only transient failures and cap attempts to a small number.
+- Test notifications should follow the same provider adapters but bypass subscription creation and alert triggering logic.
+
 ### 3.8 Provider Adapter Module
 
 Responsibilities:
@@ -189,6 +237,13 @@ Core concepts:
 - Email adapter
 - Slack adapter
 
+Refinement notes for tickets:
+
+- Use one interface per provider with methods for sending a normalized message and translating provider errors.
+- Decide the email transport during implementation planning: SMTP for the simplest local setup, or a single email API provider if deployment simplicity is more important than self-hosting.
+- For Slack, prefer a webhook or bot-token based adapter depending on the least configuration overhead for the target demo environment.
+- Keep channel-specific message formatting inside the adapter or a shared renderer so the orchestration layer stays provider-agnostic.
+
 ### 3.9 Monitoring and Retention Module
 
 Responsibilities:
@@ -202,6 +257,13 @@ Core concepts:
 - Delivery log entry
 - Failure record
 - Health summary
+
+Refinement notes for tickets:
+
+- Keep admin monitoring read-only for MVP.
+- Expose only recent delivery records, recent failures, and a summarized health state.
+- Retention can be implemented as a scheduled cleanup job that removes records older than the short operational window defined in the requirements.
+- Keep the stored log payload minimal: alert identifier, channel, timestamp, status, and a short failure reason where applicable.
 
 ## 4. Integration Architecture
 
@@ -270,6 +332,13 @@ The recommended flow is:
 
 This flow keeps integration complexity out of the UI and ensures that failure visibility is available for operators.
 
+### 4.4 Operational Boundaries
+
+- The web application should own admin UI and user-facing UI concerns.
+- The same codebase should own ingestion, matching, and notification orchestration logic.
+- Background processing may run as an in-process job in development and as a separate Node process in production if needed, but it should not require a different architecture.
+- SQLite should remain the default persistence layer for the MVP; if a later scale-up requires migration, the repository layer should contain the change.
+
 ## 5. Implementation Guidance
 
 The implementation phase should preserve the following boundaries:
@@ -285,6 +354,27 @@ Recommended supporting practices:
 - Use shared DTOs or mappers at layer boundaries.
 - Keep provider payload mapping deterministic for easier testing.
 - Add unit tests for matching, deduplication, and provider selection logic before implementing broad integration coverage.
+
+Implementation-ready ticketing should cover:
+
+- Authentication and role checks.
+- Database entities and uniqueness constraints.
+- Subscription create, list, and deactivate flows.
+- Rule create, enable, and disable flows.
+- Event ingestion normalization and deduplication.
+- Delivery orchestration and provider adapters.
+- Admin monitoring and retention cleanup.
+
+Suggested core entities for planning:
+
+- User
+- Role or permission claim
+- AlertRule
+- Subscription
+- IngestedEvent
+- Delivery
+- DeliveryAttempt
+- FailureLog
 
 ## 6. Suggested Delivery Shape For MVP
 
