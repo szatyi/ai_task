@@ -87,6 +87,37 @@ export class SqliteSubscriptionRepository implements SubscriptionRepository {
     return rows.map(mapSubscriptionRow);
   }
 
+  async listByAlertRule(alertRuleId: string): Promise<Subscription[]> {
+    const db = getSqliteDatabase();
+    const rows = db
+      .prepare("SELECT * FROM subscriptions WHERE alert_rule_id = ? ORDER BY created_at DESC")
+      .all(alertRuleId) as SubscriptionRow[];
+
+    return rows.map(mapSubscriptionRow);
+  }
+
+  async listActiveByAlertRule(alertRuleId: string): Promise<Subscription[]> {
+    const db = getSqliteDatabase();
+    const rows = db
+      .prepare(
+        "SELECT * FROM subscriptions WHERE alert_rule_id = ? AND status = 'active' ORDER BY created_at DESC",
+      )
+      .all(alertRuleId) as SubscriptionRow[];
+
+    return rows.map(mapSubscriptionRow);
+  }
+
+  async countByStatus(status: "active" | "inactive"): Promise<number> {
+    const db = getSqliteDatabase();
+    const row = db
+      .prepare("SELECT COUNT(*) as count FROM subscriptions WHERE status = ?")
+      .get(status) as {
+      count: number;
+    };
+
+    return row.count;
+  }
+
   async deactivate(subscriptionId: string, deactivatedAt: string): Promise<boolean> {
     const db = getSqliteDatabase();
     const result = db

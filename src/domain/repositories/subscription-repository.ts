@@ -21,6 +21,9 @@ export interface SubscriptionRepository {
     channel: SubscriptionChannel,
   ): Promise<Subscription | null>;
   listByUser(userId: string): Promise<Subscription[]>;
+  listByAlertRule(alertRuleId: string): Promise<Subscription[]>;
+  listActiveByAlertRule(alertRuleId: string): Promise<Subscription[]>;
+  countByStatus(status: SubscriptionStatus): Promise<number>;
   deactivate(subscriptionId: string, deactivatedAt: string): Promise<boolean>;
   activate(subscriptionId: string, activatedAt: string): Promise<boolean>;
 }

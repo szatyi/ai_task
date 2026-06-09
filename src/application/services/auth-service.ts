@@ -5,7 +5,11 @@ import type { User, UserRepository } from "@/domain/repositories/user-repository
 export class AuthError extends Error {
   constructor(
     message: string,
-    public readonly code: "INVALID_CREDENTIALS" | "ACCOUNT_DISABLED" | "UNAUTHORIZED",
+    public readonly code:
+      | "INVALID_CREDENTIALS"
+      | "ACCOUNT_DISABLED"
+      | "UNAUTHORIZED"
+      | "EMAIL_ALREADY_EXISTS",
   ) {
     super(message);
   }
@@ -42,6 +46,29 @@ export class AuthService {
     });
 
     return { user, sessionToken };
+  }
+
+  async register(email: string, displayName: string): Promise<User> {
+    const existingUser = await this.users.findByEmail(email);
+
+    if (existingUser) {
+      throw new AuthError("Email already registered", "EMAIL_ALREADY_EXISTS");
+    }
+
+    const now = new Date().toISOString();
+    const newUser: User = {
+      id: `user_${randomUUID()}`,
+      email,
+      displayName,
+      role: "user",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await this.users.create(newUser);
+
+    return newUser;
   }
 
   async me(sessionToken: string): Promise<User> {

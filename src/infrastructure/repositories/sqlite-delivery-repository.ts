@@ -72,6 +72,63 @@ export class SqliteDeliveryRepository implements DeliveryRepository {
     return row ? mapDeliveryRow(row) : null;
   }
 
+  async findByEventSubscriptionChannel(
+    eventId: string,
+    subscriptionId: string,
+    channel: "email" | "slack",
+  ): Promise<Delivery | null> {
+    const db = getSqliteDatabase();
+    const row = db
+      .prepare(
+        "SELECT * FROM deliveries WHERE event_id = ? AND subscription_id = ? AND channel = ?",
+      )
+      .get(eventId, subscriptionId, channel) as DeliveryRow | undefined;
+
+    return row ? mapDeliveryRow(row) : null;
+  }
+
+  async listRecent(params?: {
+    status?: "queued" | "sending" | "sent" | "failed" | "skipped";
+    channel?: "email" | "slack";
+    limit?: number;
+    sinceIso?: string;
+  }): Promise<Delivery[]> {
+    const db = getSqliteDatabase();
+    const filters: string[] = [];
+    const values: Array<string | number> = [];
+
+    if (params?.status) {
+      filters.push("status = ?");
+      values.push(params.status);
+    }
+
+    if (params?.channel) {
+      filters.push("channel = ?");
+      values.push(params.channel);
+    }
+
+    if (params?.sinceIso) {
+      filters.push("updated_at >= ?");
+      values.push(params.sinceIso);
+    }
+
+    const whereClause = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
+    const limit = params?.limit ?? 50;
+
+    const rows = db
+      .prepare(`SELECT * FROM deliveries ${whereClause} ORDER BY updated_at DESC LIMIT ?`)
+      .all(...values, limit) as DeliveryRow[];
+
+    return rows.map(mapDeliveryRow);
+  }
+
+  async deleteOlderThan(cutoffIso: string): Promise<number> {
+    const db = getSqliteDatabase();
+    const result = db.prepare("DELETE FROM deliveries WHERE updated_at < ?").run(cutoffIso);
+
+    return result.changes;
+  }
+
   async updateStatus(params: {
     deliveryId: string;
     status: "queued" | "sending" | "sent" | "failed" | "skipped";

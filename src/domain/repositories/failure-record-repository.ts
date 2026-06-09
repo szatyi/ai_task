@@ -12,4 +12,6 @@ export interface FailureRecord {
 export interface FailureRecordRepository {
   create(failureRecord: FailureRecord): Promise<void>;
   findByDeliveryId(deliveryId: string): Promise<FailureRecord | null>;
+  listRecent(limit?: number, sinceIso?: string): Promise<FailureRecord[]>;
+  deleteOlderThan(cutoffIso: string): Promise<number>;
 }

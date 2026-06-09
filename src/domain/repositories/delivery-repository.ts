@@ -18,6 +18,18 @@ export interface Delivery {
 export interface DeliveryRepository {
   create(delivery: Delivery): Promise<void>;
   findById(deliveryId: string): Promise<Delivery | null>;
+  findByEventSubscriptionChannel(
+    eventId: string,
+    subscriptionId: string,
+    channel: DeliveryChannel,
+  ): Promise<Delivery | null>;
+  listRecent(params?: {
+    status?: DeliveryStatus;
+    channel?: DeliveryChannel;
+    limit?: number;
+    sinceIso?: string;
+  }): Promise<Delivery[]>;
+  deleteOlderThan(cutoffIso: string): Promise<number>;
   updateStatus(params: {
     deliveryId: string;
     status: DeliveryStatus;

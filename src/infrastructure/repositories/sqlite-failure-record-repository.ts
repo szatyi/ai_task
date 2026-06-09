@@ -63,4 +63,39 @@ export class SqliteFailureRecordRepository implements FailureRecordRepository {
 
     return row ? mapFailureRecordRow(row) : null;
   }
+
+  async listRecent(limit = 50, sinceIso?: string): Promise<FailureRecord[]> {
+    const db = getSqliteDatabase();
+
+    const rows = sinceIso
+      ? (db
+          .prepare(
+            "SELECT * FROM failure_records WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?",
+          )
+          .all(sinceIso, limit) as FailureRecordRow[])
+      : (db
+          .prepare("SELECT * FROM failure_records ORDER BY created_at DESC LIMIT ?")
+          .all(limit) as FailureRecordRow[]);
+
+    return rows.map(mapFailureRecordRow);
+  }
+
+  async deleteOlderThan(cutoffIso: string): Promise<number> {
+    const db = getSqliteDatabase();
+    const result = db
+      .prepare(
+        `
+        DELETE FROM failure_records
+        WHERE created_at < @cutoffIso
+          AND id NOT IN (
+            SELECT failure_record_id
+            FROM deliveries
+            WHERE failure_record_id IS NOT NULL
+          )
+        `,
+      )
+      .run({ cutoffIso });
+
+    return result.changes;
+  }
 }

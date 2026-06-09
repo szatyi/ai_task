@@ -3,11 +3,12 @@ import type { NextRequest } from "next/server";
 import { createAuthService } from "@/infrastructure/auth/auth-service-factory";
 import { getSessionTokenFromCookieHeader } from "@/infrastructure/auth/request-auth";
 
-export async function middleware(request: NextRequest): Promise<NextResponse> {
-  if (!request.nextUrl.pathname.startsWith("/admin")) {
-    return NextResponse.next();
-  }
+export const config = {
+  runtime: "nodejs",
+  matcher: ["/admin/:path*"],
+};
 
+export async function middleware(request: NextRequest): Promise<NextResponse> {
   const sessionToken = getSessionTokenFromCookieHeader(request.headers.get("cookie"));
 
   if (!sessionToken) {
@@ -27,7 +28,3 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 }
-
-export const config = {
-  matcher: ["/admin/:path*"],
-};
